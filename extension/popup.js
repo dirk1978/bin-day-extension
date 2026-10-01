@@ -1,9 +1,13 @@
 import {
   daysUntil,
   describe,
+  describeRound,
+  fetchGardenStreets,
   findAddresses,
+  gardenRoundsFor,
   normalisePostcode,
   parseIso,
+  resolveGardenRound,
   upcoming,
 } from "./lib.js";
 import { drawBin } from "./icons.js";
@@ -13,6 +17,9 @@ const asTab = new URLSearchParams(location.search).has("setup");
 if (asTab) document.body.classList.add("tab");
 
 let settings = null;
+// The council's garden waste street table: fetched alongside the address
+// search, null until then, [] if it couldn't be loaded.
+let gardenRows = null;
 
 init();
 
@@ -41,6 +48,9 @@ async function renderMain() {
   const list = ready ? upcoming(cache.schedule, today, settings.garden) : [];
 
   $("address-line").textContent = `${titleCase(settings.address)}, ${settings.postcode}`;
+  const round = ready ? resolveGardenRound(cache.schedule, settings.garden) : null;
+  $("garden-line").hidden = !round;
+  $("garden-line").textContent = round ? `Brown bin: ${describeRound(round)}` : "";
   $("error").hidden = !cache.error || cache.uprn !== settings.uprn;
   $("error").textContent = ready
     ? `Couldn't update from the council just now, so these are the last dates fetched. (${cache.error})`
@@ -120,8 +130,7 @@ function showSetup() {
   if (settings) {
     $("postcode").value = settings.postcode || "";
     $("remind").checked = settings.remind !== false;
-    const garden = document.querySelector(`input[name=garden][value="${settings.garden || "none"}"]`);
-    if (garden) garden.checked = true;
+    $("has-garden").checked = Boolean(settings.garden && settings.garden !== "none");
   }
   $("postcode").focus();
 }
@@ -132,7 +141,11 @@ $("postcode-form").addEventListener("submit", async (event) => {
   $("find").disabled = true;
   $("find").textContent = "Finding…";
   try {
-    const addresses = await findAddresses($("postcode").value);
+    const [addresses, rows] = await Promise.all([
+      findAddresses($("postcode").value),
+      fetchGardenStreets().catch(() => []),
+    ]);
+    gardenRows = rows;
     $("postcode").value = normalisePostcode($("postcode").value);
     const select = $("address");
     select.replaceChildren(
@@ -143,6 +156,7 @@ $("postcode-form").addEventListener("submit", async (event) => {
       }),
     );
     if (settings?.uprn) select.value = settings.uprn;
+    renderGarden();
     $("settings-form").hidden = false;
     select.focus();
   } catch (err) {
@@ -162,7 +176,7 @@ $("settings-form").addEventListener("submit", async (event) => {
     postcode: normalisePostcode($("postcode").value),
     uprn: option.value,
     address: option.dataset.address,
-    garden: document.querySelector("input[name=garden]:checked").value,
+    garden: chosenGarden(),
     remind: $("remind").checked,
     remindHour: 19,
   };
@@ -174,6 +188,61 @@ $("settings-form").addEventListener("submit", async (event) => {
 });
 
 $("cancel").addEventListener("click", () => showMain());
+$("has-garden").addEventListener("change", () => renderGarden());
+$("address").addEventListener("change", () => renderGarden());
+
+/**
+ * Garden waste choices for the selected address. The council's street table
+ * gives the brown bin's day and calendar; only if the street isn't in it do we
+ * fall back to asking which bin it goes out with.
+ */
+function renderGarden() {
+  const on = $("has-garden").checked;
+  $("garden-detail").hidden = !on;
+  if (!on) return;
+
+  const address = $("address").selectedOptions[0]?.dataset.address || "";
+  const rounds = gardenRoundsFor(gardenRows || [], $("postcode").value, address);
+  const saved = settings?.garden;
+  let choices;
+
+  if (rounds.length) {
+    $("garden-found").textContent = rounds.length === 1
+      ? "From the council's garden waste list, your brown bin is collected on:"
+      : "The council lists more than one garden waste round for this postcode. Choose yours:";
+    choices = rounds.map((r) => ({
+      label: describeRound(r),
+      value: { calendar: r.calendar, day: r.day },
+    }));
+  } else {
+    $("garden-found").textContent = gardenRows?.length
+      ? "Your street isn't in the council's garden waste list. Which bin does your brown bin go out with?"
+      : "Couldn't load the council's garden waste list. Which bin does your brown bin go out with?";
+    choices = ["Green", "Grey"].map((c) => ({ label: `With my ${c} bin`, value: { pairWith: c } }));
+  }
+
+  const savedKey = JSON.stringify(typeof saved === "string" ? { pairWith: saved } : saved);
+  const hasSaved = choices.some((c) => JSON.stringify(c.value) === savedKey);
+  $("garden-choices").replaceChildren(
+    ...choices.map((choice, i) => {
+      const label = document.createElement("label");
+      label.className = "choice";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "garden-round";
+      input.value = JSON.stringify(choice.value);
+      input.checked = hasSaved ? input.value === savedKey : i === 0;
+      label.append(input, ` ${choice.label}`);
+      return label;
+    }),
+  );
+}
+
+function chosenGarden() {
+  if (!$("has-garden").checked) return "none";
+  const picked = document.querySelector("input[name=garden-round]:checked");
+  return picked ? JSON.parse(picked.value) : "none";
+}
 
 function setupError(message) {
   $("setup-error").hidden = !message;

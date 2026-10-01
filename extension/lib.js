@@ -4,9 +4,22 @@
 
 export const BASE_URL = "https://bincollections.bromsgrove.gov.uk";
 
-// Bromsgrove's garden waste season, from the council's 2026 leaflet:
-// "Brown bin week W/C 2nd Mar - W/E 11th Dec". Re-check each January.
-export const GARDEN_SEASON = { start: [3, 2], end: [12, 11] };
+// The council's per-street garden waste (brown bin) table: street, locality,
+// postcode, collection day and calendar. Republished each year.
+export const GARDEN_STREETS_URL =
+  "https://www.bromsgrove.gov.uk/residents/my-place/bins-and-recycling/garden-waste-service/garden-waste-collection-dates-2026/";
+
+// Brown bin weeks from the council's 2026 leaflets: fortnightly, from the
+// week commencing `first` to the week commencing `last` (both Mondays).
+// A and C share weeks; C is Redditch's calendar for 3 border streets and
+// stops earlier. Update these, and GARDEN_STREETS_URL, each January.
+export const GARDEN_CALENDARS = {
+  A: { first: "2026-02-23", last: "2026-11-30", label: "fortnightly, 23 Feb to 4 Dec" },
+  B: { first: "2026-03-02", last: "2026-12-07", label: "fortnightly, 2 Mar to 11 Dec" },
+  C: { first: "2026-02-23", last: "2026-11-16", label: "fortnightly, 23 Feb to 20 Nov" },
+};
+
+const WEEKDAYS = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
 
 export const BIN_COLOURS = {
   Green: "#2e8b3d",
@@ -65,38 +78,119 @@ export function parseSchedule(html) {
   return schedule;
 }
 
-export function inGardenSeason(isoDay, season = GARDEN_SEASON) {
-  const [, m, d] = isoDay.split("-").map(Number);
-  const marker = m * 100 + d;
-  const start = season.start[0] * 100 + season.start[1];
-  const end = season.end[0] * 100 + season.end[1];
-  return start <= end ? marker >= start && marker <= end : marker >= start || marker <= end;
+/**
+ * Parse the council's garden waste street table into
+ * [{street, locality, postcodes: [...], day: "FRIDAY", calendar: "B"}].
+ * Some cells hold several postcodes ("B61 7FT / B61 7FW"); header rows repeat
+ * down the page and are skipped.
+ */
+export function parseGardenStreets(html) {
+  const rows = [];
+  const cell = "<td[^>]*>([^<]*)</td>\\s*";
+  const rowRe = new RegExp(`<tr[^>]*>\\s*${cell.repeat(5)}</tr>`, "gi");
+  for (const m of html.matchAll(rowRe)) {
+    const [street, locality, postcodeCell, day, calendarCell] = m
+      .slice(1)
+      .map((v) => decodeEntities(v).replace(/[\s ]+/g, " ").trim());
+    const calendar = calendarCell.match(/^Calendar ([A-Z])$/i)?.[1]?.toUpperCase();
+    const weekday = day.toUpperCase();
+    if (!calendar || !WEEKDAYS.includes(weekday)) continue; // header rows
+    const postcodes = [...postcodeCell.toUpperCase().matchAll(/[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}/g)]
+      .map((p) => normalisePostcode(p[0]));
+    rows.push({ street, locality, postcodes, day: weekday, calendar });
+  }
+  return rows;
 }
 
 /**
- * Bins due on a date for this household. `garden` is "none", "Green" or
- * "Grey": the bin the brown one goes out with. The council page never lists
- * the brown bin because it's a paid opt-in, so it's added here.
+ * The garden waste rounds the council lists for a postcode, de-duplicated by
+ * day and calendar. Usually one; a few postcodes have two.
  */
-export function binsFor(schedule, isoDay, garden = "none") {
-  const bins = [...(schedule[isoDay] || [])];
-  if (
-    garden !== "none" &&
-    bins.includes(garden) &&
-    !bins.includes("Brown") &&
-    inGardenSeason(isoDay)
-  ) {
-    bins.push("Brown");
+export function gardenRoundsFor(rows, postcode, address = "") {
+  const pc = normalisePostcode(postcode);
+  let matches = rows.filter((r) => r.postcodes.includes(pc));
+  // Prefer rows whose street is in the address, when that narrows it down.
+  const upper = address.toUpperCase();
+  const byStreet = matches.filter((r) => upper.includes(r.street.toUpperCase()));
+  if (byStreet.length) matches = byStreet;
+  const seen = new Map();
+  for (const r of matches) {
+    seen.set(`${r.day}|${r.calendar}`, { day: r.day, calendar: r.calendar });
   }
-  return bins;
+  return [...seen.values()];
 }
 
+/** Brown bin dates for a round {day, calendar}, as ISO dates. */
+export function brownDates(round) {
+  const cal = GARDEN_CALENDARS[round?.calendar];
+  const offset = WEEKDAYS.indexOf(round?.day) - 1; // days after Monday
+  if (!cal || offset < 0 || offset > 5) return [];
+  const out = [];
+  const monday = parseIso(cal.first);
+  while (isoDate(monday) <= cal.last) {
+    const day = new Date(monday);
+    day.setDate(day.getDate() + offset);
+    out.push(isoDate(day));
+    monday.setDate(monday.getDate() + 14);
+  }
+  return out;
+}
+
+/**
+ * Work out the household's brown bin round from their saved setting:
+ *   "none" or missing                 -> null
+ *   {calendar, day}                   -> from the council's street table
+ *   {pairWith: "Green"}, or "Green"   -> fallback (and v1.0 settings): the
+ *     calendar whose weeks contain that bin's collections, on that bin's day
+ */
+export function resolveGardenRound(schedule, garden) {
+  if (!garden || garden === "none") return null;
+  if (garden.calendar && garden.day) return { calendar: garden.calendar, day: garden.day };
+  const pairWith = typeof garden === "string" ? garden : garden.pairWith;
+  const dates = Object.keys(schedule).filter((d) => schedule[d].includes(pairWith));
+  if (!dates.length) return null;
+  const day = WEEKDAYS[parseIso(dates[0]).getDay()];
+  for (const calendar of ["B", "A"]) {
+    const weeks = new Set(brownDates({ calendar, day }));
+    if (dates.some((d) => weeks.has(d))) return { calendar, day };
+  }
+  return null;
+}
+
+/**
+ * The schedule with the brown bin merged in. The council's bin page never
+ * lists it (it's a paid extra), and it can be on a different day from the
+ * other bins. Brown dates are only added up to the last date the council page
+ * covers, so the list doesn't run on with brown-only weeks.
+ */
+export function withGarden(schedule, round) {
+  const days = Object.keys(schedule).sort();
+  if (!round || !days.length) return schedule;
+  const merged = Object.fromEntries(Object.entries(schedule).map(([d, b]) => [d, [...b]]));
+  for (const d of brownDates(round)) {
+    if (d > days.at(-1)) break;
+    const bins = (merged[d] ||= []);
+    if (!bins.includes("Brown")) bins.push("Brown");
+  }
+  return merged;
+}
+
+/** Collections on or after `today`, with the household's brown bin added. */
 export function upcoming(schedule, today, garden = "none") {
   const from = isoDate(today);
-  return Object.keys(schedule)
+  const merged = withGarden(schedule, resolveGardenRound(schedule, garden));
+  return Object.keys(merged)
     .sort()
     .filter((d) => d >= from)
-    .map((d) => ({ date: d, bins: binsFor(schedule, d, garden) }));
+    .map((d) => ({ date: d, bins: merged[d] }));
+}
+
+/** "Fridays, Calendar B (fortnightly, 2 Mar to 11 Dec)". */
+export function describeRound(round) {
+  if (!round) return "";
+  const day = round.day.charAt(0) + round.day.slice(1).toLowerCase();
+  const label = GARDEN_CALENDARS[round.calendar]?.label || "dates unknown";
+  return `${day}s, Calendar ${round.calendar} (${label})`;
 }
 
 /** The first collection on or after `today` (a Date), or null. */
@@ -166,6 +260,14 @@ export async function findAddresses(postcode, fetchImpl = fetch) {
     throw new Error(`No addresses found for ${pc}. This only works for Bromsgrove District postcodes.`);
   }
   return addresses;
+}
+
+export async function fetchGardenStreets(fetchImpl = fetch) {
+  const res = await fetchImpl(GARDEN_STREETS_URL);
+  if (!res.ok) throw new Error(`The council site returned ${res.status}.`);
+  const rows = parseGardenStreets(await res.text());
+  if (!rows.length) throw new Error("Couldn't read the council's garden waste street list.");
+  return rows;
 }
 
 export async function fetchSchedule(uprn, fetchImpl = fetch) {

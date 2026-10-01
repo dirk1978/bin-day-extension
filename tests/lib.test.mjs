@@ -4,16 +4,19 @@ import { readFileSync } from "node:fs";
 
 import {
   badgeText,
-  binsFor,
+  brownDates,
   daysUntil,
   describe,
+  describeRound,
   findAddresses,
-  inGardenSeason,
+  gardenRoundsFor,
   isValidPostcode,
   nextCollection,
   normalisePostcode,
   parseAddresses,
+  parseGardenStreets,
   parseSchedule,
+  resolveGardenRound,
   upcoming,
   whenLabel,
 } from "../extension/lib.js";
@@ -61,24 +64,89 @@ test("the schedule page is parsed into dates and colours", () => {
   });
 });
 
-test("garden season runs 2 March to 11 December inclusive", () => {
-  assert.ok(!inGardenSeason("2026-03-01"));
-  assert.ok(inGardenSeason("2026-03-02"));
-  assert.ok(inGardenSeason("2026-12-11"));
-  assert.ok(!inGardenSeason("2026-12-12"));
-  assert.ok(!inGardenSeason("2027-01-15"));
+// The council's 2026 garden waste street table, saved on 1 Oct 2026.
+const gardenRows = parseGardenStreets(fixture("fixture-garden-streets.html"));
+const datesOn = (list) => list.map((c) => `${c.date} ${c.bins.join("+")}`);
+
+test("the garden waste street table is parsed, skipping header rows", () => {
+  assert.equal(gardenRows.length, 1339);
+  assert.ok(gardenRows.every((r) => ["A", "B", "C"].includes(r.calendar)));
+  assert.deepEqual(
+    gardenRows.find((r) => r.street === "WILLOW CLOSE" && r.locality === "HAGLEY"),
+    { street: "WILLOW CLOSE", locality: "HAGLEY", postcodes: ["DY9 0LU"], day: "THURSDAY", calendar: "A" },
+  );
 });
 
-test("brown is added to whichever bin the household chose", () => {
-  assert.deepEqual(binsFor(schedule, "2026-10-01", "none"), ["Green"]);
-  assert.deepEqual(binsFor(schedule, "2026-10-01", "Green"), ["Green", "Brown"]);
-  assert.deepEqual(binsFor(schedule, "2026-10-08", "Green"), ["Grey"]);
-  assert.deepEqual(binsFor(schedule, "2026-10-08", "Grey"), ["Grey", "Brown"]);
+test("a postcode finds its brown bin round", () => {
+  assert.deepEqual(gardenRoundsFor(gardenRows, "dy90lu", "3 WILLOW CLOSE"), [{ day: "THURSDAY", calendar: "A" }]);
+  assert.deepEqual(gardenRoundsFor(gardenRows, "SW1A 1AA"), []);
 });
 
-test("brown is not added out of season or twice", () => {
-  assert.deepEqual(binsFor({ "2026-12-18": ["Green"] }, "2026-12-18", "Green"), ["Green"]);
-  assert.deepEqual(binsFor({ "2026-10-02": ["Brown", "Green"] }, "2026-10-02", "Green"), ["Brown", "Green"]);
+test("cells holding several postcodes match each of them", () => {
+  // "B61 7FT / B61 7FW" in one cell.
+  assert.deepEqual(gardenRoundsFor(gardenRows, "B61 7FW"), [{ day: "THURSDAY", calendar: "B" }]);
+  assert.deepEqual(gardenRoundsFor(gardenRows, "B61 7FT"), [{ day: "THURSDAY", calendar: "B" }]);
+});
+
+test("a postcode with two rounds returns both to choose from", () => {
+  assert.deepEqual(gardenRoundsFor(gardenRows, "B45 9QW"), [
+    { day: "WEDNESDAY", calendar: "B" },
+    { day: "THURSDAY", calendar: "B" },
+  ]);
+});
+
+test("calendar weeks match the council's 2026 leaflets", () => {
+  const b = brownDates({ calendar: "B", day: "FRIDAY" });
+  assert.equal(b[0], "2026-03-06"); // W/C 2 Mar
+  assert.equal(b.at(-1), "2026-12-11"); // W/E 11 Dec
+  assert.ok(b.includes("2026-10-02"));
+  assert.ok(!b.includes("2026-10-09"));
+
+  const a = brownDates({ calendar: "A", day: "MONDAY" });
+  assert.equal(a[0], "2026-02-23");
+  assert.equal(a.at(-1), "2026-11-30"); // W/E 4 Dec
+
+  const c = brownDates({ calendar: "C", day: "MONDAY" });
+  assert.deepEqual([c[0], c.at(-1)], ["2026-02-23", "2026-11-16"]); // W/E 20 Nov
+  assert.deepEqual(brownDates({ calendar: "Z", day: "MONDAY" }), []);
+});
+
+test("brown is added on the round's weeks", () => {
+  const wednesday = new Date(2026, 8, 30);
+  assert.deepEqual(datesOn(upcoming(schedule, wednesday, "none")), [
+    "2026-10-01 Green", "2026-10-08 Grey", "2026-10-15 Green", "2026-10-22 Grey",
+  ]);
+  assert.deepEqual(datesOn(upcoming(schedule, wednesday, { calendar: "A", day: "THURSDAY" })), [
+    "2026-10-01 Green", "2026-10-08 Grey+Brown", "2026-10-15 Green", "2026-10-22 Grey+Brown",
+  ]);
+});
+
+test("a brown day that differs from the other bins is its own collection", () => {
+  assert.deepEqual(datesOn(upcoming(schedule, new Date(2026, 8, 30), { calendar: "A", day: "TUESDAY" })), [
+    "2026-10-01 Green", "2026-10-06 Brown", "2026-10-08 Grey", "2026-10-15 Green", "2026-10-20 Brown", "2026-10-22 Grey",
+  ]);
+});
+
+test("brown is not added past the council's horizon or the season", () => {
+  const late = { "2026-12-10": ["Green"], "2026-12-17": ["Grey"] };
+  assert.deepEqual(datesOn(upcoming(late, new Date(2026, 11, 1), { calendar: "B", day: "THURSDAY" })), [
+    "2026-12-10 Green+Brown", "2026-12-17 Grey",
+  ]);
+  assert.deepEqual(datesOn(upcoming({ "2027-03-04": ["Green"] }, new Date(2027, 2, 1), { calendar: "B", day: "THURSDAY" })), [
+    "2027-03-04 Green",
+  ]);
+});
+
+test("v1.0 'with Green/Grey' settings still resolve to a calendar", () => {
+  assert.deepEqual(resolveGardenRound(schedule, "Grey"), { calendar: "A", day: "THURSDAY" });
+  assert.deepEqual(resolveGardenRound(schedule, "Green"), { calendar: "B", day: "THURSDAY" });
+  assert.deepEqual(resolveGardenRound(schedule, { pairWith: "Grey" }), { calendar: "A", day: "THURSDAY" });
+  assert.equal(resolveGardenRound(schedule, "none"), null);
+  assert.equal(resolveGardenRound(schedule, undefined), null);
+});
+
+test("rounds are described for the popup", () => {
+  assert.equal(describeRound({ calendar: "B", day: "FRIDAY" }), "Fridays, Calendar B (fortnightly, 2 Mar to 11 Dec)");
 });
 
 test("the evening before, the next collection is tomorrow's", () => {

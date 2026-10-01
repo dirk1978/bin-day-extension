@@ -3,7 +3,10 @@
 // state the service worker produces. Screenshots go to ./dist/.
 //
 //   PLAYWRIGHT=/path/to/node_modules/playwright CHROME=/path/to/chrome \
-//     node scripts/e2e.mjs [POSTCODE] [HOUSE-NUMBER] [none|Green|Grey]
+//     node scripts/e2e.mjs [POSTCODE] [HOUSE-NUMBER] [none|yes|Green|Grey]
+//
+// "yes" ticks garden waste and takes the council's round; Green/Grey also pick
+// that fallback when the street isn't in the council's list.
 
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +17,7 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT || "playwright");
 
-const [postcode = "DY9 0LU", house = "3", garden = "Green"] = process.argv.slice(2);
+const [postcode = "DY9 0LU", house = "3", garden = "yes"] = process.argv.slice(2);
 const extension = fileURLToPath(new URL("../extension/", import.meta.url));
 const out = fileURLToPath(new URL("../dist/", import.meta.url));
 mkdirSync(out, { recursive: true });
@@ -53,7 +56,18 @@ try {
     house,
   );
   await setup.selectOption("#address", match);
-  await setup.check(`input[name=garden][value="${garden}"]`);
+  if (garden !== "none") {
+    await setup.check("#has-garden");
+    await setup.waitForSelector("input[name=garden-round]");
+    console.log("garden:", await setup.textContent("#garden-found"));
+    const choices = await setup.$$eval("#garden-choices label", (ls) => ls.map((l) => l.textContent.trim()));
+    console.log("garden choices:", choices.join(" | "));
+    if (garden === "Green" || garden === "Grey") {
+      // Only offered when the street isn't in the council's list.
+      const fallback = setup.locator(`input[name=garden-round][value*='"${garden}"']`);
+      if (await fallback.count()) await fallback.check();
+    }
+  }
   await setup.screenshot({ path: join(out, "setup.png") });
   await setup.click("#settings-form button[type=submit]");
 

@@ -30,10 +30,21 @@ Chrome may sometimes ask whether to keep developer-mode extensions. Keep it.
   `bincollections.bromsgrove.gov.uk`, and the schedule from the same site's
   details page. It's refreshed every 6 hours, and the last good schedule is
   kept if the site is down.
-- **Brown bins aren't on the council's site**, because garden waste is a paid
-  extra. If you say you have one, it's added on the weeks of the bin you chose,
-  during the season (2 March to 11 December, from the council's 2026 leaflet;
-  update `GARDEN_SEASON` in `extension/lib.js` each January).
+- **Brown bins aren't on the council's bin dates page**, because garden waste
+  is a paid extra. If you tick that you pay for it, Bin Day looks your postcode
+  up in the council's
+  [garden waste street list](https://www.bromsgrove.gov.uk/residents/my-place/bins-and-recycling/garden-waste-service/garden-waste-collection-dates-2026/),
+  which gives each street's brown bin day and calendar:
+  - Calendar A: fortnightly, w/c 23 Feb to w/e 4 Dec
+  - Calendar B: fortnightly, w/c 2 Mar to w/e 11 Dec
+  - Calendar C (3 streets, Redditch's round): the same weeks as A, ending w/e 20 Nov
+
+  The brown day can differ from your other bins, and it's shown as its own
+  collection when it does. If a street isn't in the list, setup asks which bin
+  the brown one goes out with instead.
+- **Each January**, update `GARDEN_CALENDARS` and `GARDEN_STREETS_URL` in
+  `extension/lib.js` from the council's new leaflets. Until then, no brown
+  dates are added for the new year.
 - The reminder only fires while Chrome is running. If Chrome opens later that
   evening, it fires then.
 

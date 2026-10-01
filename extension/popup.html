@@ -20,6 +20,7 @@
       <h2>Coming up</h2>
       <ul class="upcoming" id="upcoming"></ul>
       <p class="muted small" id="address-line"></p>
+      <p class="muted small" id="garden-line" hidden></p>
       <div class="actions">
         <button type="button" id="refresh" class="secondary">Refresh</button>
         <button type="button" id="change" class="secondary">Change address</button>
@@ -46,10 +47,11 @@
 
         <fieldset>
           <legend>Garden waste (brown bin)</legend>
-          <label class="choice"><input type="radio" name="garden" value="none" checked> I don't pay for garden waste</label>
-          <label class="choice"><input type="radio" name="garden" value="Green"> It goes out with my Green bin</label>
-          <label class="choice"><input type="radio" name="garden" value="Grey"> It goes out with my Grey bin</label>
-          <p class="muted small">The council's site doesn't list brown bins, so Bin Day adds yours on the right weeks between March and December.</p>
+          <label class="choice"><input type="checkbox" id="has-garden"> I pay for garden waste</label>
+          <div id="garden-detail" hidden>
+            <p class="muted small" id="garden-found"></p>
+            <div id="garden-choices"></div>
+          </div>
         </fieldset>
 
         <label class="choice"><input type="checkbox" id="remind" checked> Remind me at 7pm the evening before</label>
