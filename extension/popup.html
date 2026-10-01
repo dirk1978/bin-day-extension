@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <title>Bin Day</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main id="app">
+    <section id="view-main" hidden>
+      <div class="hero">
+        <canvas id="hero-icon" width="96" height="96" aria-hidden="true"></canvas>
+        <div>
+          <p class="eyebrow" id="hero-when"></p>
+          <h1 id="hero-text"></h1>
+          <p class="muted" id="hero-date"></p>
+        </div>
+      </div>
+      <p class="banner" id="error" hidden></p>
+      <h2>Coming up</h2>
+      <ul class="upcoming" id="upcoming"></ul>
+      <p class="muted small" id="address-line"></p>
+      <div class="actions">
+        <button type="button" id="refresh" class="secondary">Refresh</button>
+        <button type="button" id="change" class="secondary">Change address</button>
+      </div>
+      <p class="muted small" id="updated"></p>
+      <p class="banner tip" id="tip" hidden>All set. To keep Bin Day on your toolbar, click the puzzle-piece icon and pin it. You can close this tab.</p>
+    </section>
+
+    <section id="view-setup" hidden>
+      <h1>Bin Day</h1>
+      <p class="muted">See which bins go out next, for any address in Bromsgrove District.</p>
+
+      <form id="postcode-form">
+        <label for="postcode">Postcode</label>
+        <div class="row">
+          <input id="postcode" name="postcode" autocomplete="postal-code" placeholder="e.g. B61 8DA" required>
+          <button type="submit" id="find">Find</button>
+        </div>
+      </form>
+
+      <form id="settings-form" hidden>
+        <label for="address">Address</label>
+        <select id="address" required></select>
+
+        <fieldset>
+          <legend>Garden waste (brown bin)</legend>
+          <label class="choice"><input type="radio" name="garden" value="none" checked> I don't pay for garden waste</label>
+          <label class="choice"><input type="radio" name="garden" value="Green"> It goes out with my Green bin</label>
+          <label class="choice"><input type="radio" name="garden" value="Grey"> It goes out with my Grey bin</label>
+          <p class="muted small">The council's site doesn't list brown bins, so Bin Day adds yours on the right weeks between March and December.</p>
+        </fieldset>
+
+        <label class="choice"><input type="checkbox" id="remind" checked> Remind me at 7pm the evening before</label>
+
+        <div class="actions">
+          <button type="submit">Save</button>
+          <button type="button" id="cancel" class="secondary" hidden>Cancel</button>
+        </div>
+      </form>
+
+      <p class="banner" id="setup-error" hidden></p>
+    </section>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
