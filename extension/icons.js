@@ -7,6 +7,9 @@ import { BIN_COLOURS } from "./lib.js";
 
 const OUTLINE = "#1f2937";
 const EMPTY = "#d1d5db";
+const VAN_BODY = "#e5e7eb";
+const VAN_CAB = "#f59e0b";
+const VAN_WINDOW = "#bfdbfe";
 
 /**
  * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
@@ -54,6 +57,63 @@ export function drawBin(ctx, size, bins) {
   }
 }
 
+/**
+ * A bin lorry driving off to the right: "the van's been". Same 32px grid and
+ * outline as the bin so the two read as one icon set.
+ */
+export function drawVan(ctx, size) {
+  const s = size / 32;
+  ctx.clearRect(0, 0, size, size);
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(1, 1.5 * s);
+  ctx.strokeStyle = OUTLINE;
+
+  // Motion lines behind it (only legible from 32px up).
+  if (size >= 32) {
+    ctx.beginPath();
+    for (const y of [12, 17, 22]) {
+      ctx.moveTo(0.5 * s, y * s);
+      ctx.lineTo(3.5 * s, y * s);
+    }
+    ctx.stroke();
+  }
+
+  // Refuse body.
+  ctx.fillStyle = VAN_BODY;
+  ctx.beginPath();
+  ctx.rect(5 * s, 8 * s, 16 * s, 16 * s);
+  ctx.fill();
+  ctx.stroke();
+
+  // Cab, with its window.
+  ctx.fillStyle = VAN_CAB;
+  ctx.beginPath();
+  ctx.moveTo(21 * s, 12 * s);
+  ctx.lineTo(27 * s, 12 * s);
+  ctx.lineTo(30 * s, 17 * s);
+  ctx.lineTo(30 * s, 24 * s);
+  ctx.lineTo(21 * s, 24 * s);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = VAN_WINDOW;
+  ctx.beginPath();
+  ctx.moveTo(23 * s, 14 * s);
+  ctx.lineTo(26.5 * s, 14 * s);
+  ctx.lineTo(28.5 * s, 17.5 * s);
+  ctx.lineTo(23 * s, 17.5 * s);
+  ctx.closePath();
+  ctx.fill();
+
+  // Wheels.
+  ctx.fillStyle = OUTLINE;
+  for (const x of [10, 25]) {
+    ctx.beginPath();
+    ctx.arc(x * s, 26 * s, 3 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 function fillStriped(ctx, path, colours, x0, width, size) {
   const stripe = width / colours.length;
   colours.forEach((colour, i) => {
@@ -67,13 +127,17 @@ function fillStriped(ctx, path, colours, x0, width, size) {
   });
 }
 
-/** ImageData map for chrome.action.setIcon, from inside the service worker. */
+/**
+ * ImageData map for chrome.action.setIcon, from inside the service worker.
+ * `bins` is a list of colours, or "van" once today's collection is done.
+ */
 export function iconImageData(bins, sizes = [16, 32, 48]) {
   const out = {};
   for (const size of sizes) {
     const canvas = new OffscreenCanvas(size, size);
     const ctx = canvas.getContext("2d");
-    drawBin(ctx, size, bins);
+    if (bins === "van") drawVan(ctx, size);
+    else drawBin(ctx, size, bins);
     out[size] = ctx.getImageData(0, 0, size, size);
   }
   return out;

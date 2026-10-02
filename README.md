@@ -5,6 +5,8 @@ Bromsgrove District, and reminds you at 7pm the evening before.
 
 - The toolbar icon is drawn in that week's bin colours: green, grey, or split
   green and brown. A badge shows the day ("Fri"), or "Now" on collection day.
+- From 9am on collection day the icon turns into a bin lorry with a ✓ badge:
+  the van's been. At midnight it goes back to showing the next bins.
 - Click it for the next collection and the weeks after.
 - Each person enters their own postcode and picks their address. Nothing leaves
   the browser except requests to the council's own bin collection site.

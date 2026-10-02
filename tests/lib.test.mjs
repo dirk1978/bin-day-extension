@@ -5,6 +5,9 @@ import { readFileSync } from "node:fs";
 import {
   badgeText,
   brownDates,
+  COLLECTED_HOUR,
+  collectedAt,
+  collectionState,
   daysUntil,
   describe,
   describeRound,
@@ -143,6 +146,32 @@ test("v1.0 'with Green/Grey' settings still resolve to a calendar", () => {
   assert.deepEqual(resolveGardenRound(schedule, { pairWith: "Grey" }), { calendar: "A", day: "THURSDAY" });
   assert.equal(resolveGardenRound(schedule, "none"), null);
   assert.equal(resolveGardenRound(schedule, undefined), null);
+});
+
+test("before 9am on collection day the bins are still to go", () => {
+  const state = collectionState(schedule, new Date(2026, 9, 1, 8, 59), "Green");
+  assert.equal(state.collected, null);
+  assert.deepEqual(state.next, { date: "2026-10-01", bins: ["Green", "Brown"] });
+});
+
+test("from 9am on collection day the van has been", () => {
+  const state = collectionState(schedule, new Date(2026, 9, 1, 9, 0), "Green");
+  assert.deepEqual(state.collected, { date: "2026-10-01", bins: ["Green", "Brown"] });
+  assert.deepEqual(state.next, { date: "2026-10-08", bins: ["Grey"] });
+});
+
+test("the evening before is never 'collected', even after 9", () => {
+  assert.equal(collectionState(schedule, new Date(2026, 8, 30, 21, 0)).collected, null);
+});
+
+test("the last listed collection, once done, leaves next empty", () => {
+  const state = collectionState({ "2026-10-22": ["Grey"] }, new Date(2026, 9, 22, 12, 0));
+  assert.deepEqual(state, { collected: { date: "2026-10-22", bins: ["Grey"] }, next: null });
+});
+
+test("collectedAt is 9am local on the day", () => {
+  assert.equal(collectedAt("2026-10-02").getTime(), new Date(2026, 9, 2, 9, 0, 0).getTime());
+  assert.equal(COLLECTED_HOUR, 9);
 });
 
 test("rounds are described for the popup", () => {

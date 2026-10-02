@@ -185,6 +185,31 @@ export function upcoming(schedule, today, garden = "none") {
     .map((d) => ({ date: d, bins: merged[d] }));
 }
 
+// From this hour on collection day we assume the van has been. Bins have to
+// be out by 7am; most rounds are done well before 9.
+export const COLLECTED_HOUR = 9;
+
+/**
+ * Where we are relative to collections at `now`:
+ *   {collected: {date, bins} | null, next: {date, bins} | null}
+ * `collected` is today's collection once it's past COLLECTED_HOUR, and `next`
+ * is then the one after it. Otherwise `collected` is null.
+ */
+export function collectionState(schedule, now, garden = "none") {
+  const [first, second] = upcoming(schedule, now, garden);
+  if (first && daysUntil(first.date, now) === 0 && now.getHours() >= COLLECTED_HOUR) {
+    return { collected: first, next: second || null };
+  }
+  return { collected: null, next: first || null };
+}
+
+/** The Date at which today's collection counts as done. */
+export function collectedAt(isoDay) {
+  const at = parseIso(isoDay);
+  at.setHours(COLLECTED_HOUR, 0, 0, 0);
+  return at;
+}
+
 /** "Fridays, Calendar B (fortnightly, 2 Mar to 11 Dec)". */
 export function describeRound(round) {
   if (!round) return "";

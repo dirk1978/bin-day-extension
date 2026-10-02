@@ -5,7 +5,15 @@
 //   sync  settings  {postcode, uprn, address, garden, remind, remindHour}
 //   local cache     {uprn, schedule, fetchedAt, error, notifiedFor}
 
-import { badgeText, describe, fetchSchedule, nextCollection, whenLabel } from "./lib.js";
+import {
+  badgeText,
+  collectedAt,
+  collectionState,
+  daysUntil,
+  describe,
+  fetchSchedule,
+  whenLabel,
+} from "./lib.js";
 import { iconImageData } from "./icons.js";
 
 const REFRESH_MINUTES = 6 * 60;
@@ -26,7 +34,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.alarms.onAlarm.addListener(async ({ name }) => {
   if (name === "refresh") await refresh();
-  else await update(); // "tick" and "remind": no network, just re-evaluate
+  else await update(); // "tick", "remind", "collected": no network, just re-evaluate
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -92,9 +100,19 @@ async function update() {
     return;
   }
 
-  const next = cache.uprn === settings.uprn && cache.schedule
-    ? nextCollection(cache.schedule, now, settings.garden)
-    : null;
+  const { collected, next } = cache.uprn === settings.uprn && cache.schedule
+    ? collectionState(cache.schedule, now, settings.garden)
+    : { collected: null, next: null };
+
+  await scheduleAlarms(settings, next, now);
+
+  if (collected) {
+    // Past COLLECTED_HOUR on collection day: the van's been.
+    const after = next ? ` Next: ${describe(next.bins)} ${onDay(next.date, now)}.` : "";
+    await setIcon("van", "✓", `Bin Day: today's ${describe(collected.bins)} collected.${after}`, "#15803d");
+    if (next) await maybeNotify(settings, cache, next, now);
+    return;
+  }
 
   if (!next) {
     const why = cache.error ? `couldn't reach the council (${cache.error})` : "no dates yet";
@@ -102,27 +120,45 @@ async function update() {
     return;
   }
 
-  const when = whenLabel(next.date, now);
-  await setIcon(next.bins, badgeText(next.date, now), `Bin Day: ${describe(next.bins)} ${when}`);
-  await scheduleReminder(settings, next, now);
+  const today = daysUntil(next.date, now) === 0;
+  await setIcon(
+    next.bins,
+    badgeText(next.date, now),
+    `Bin Day: ${describe(next.bins)} ${whenLabel(next.date, now)}`,
+    today ? "#b91c1c" : "#374151",
+  );
   await maybeNotify(settings, cache, next, now);
 }
 
-async function setIcon(bins, badge, title) {
+/** "tomorrow", or "on Friday". */
+function onDay(isoDay, now) {
+  const label = whenLabel(isoDay, now);
+  return label === "tomorrow" || label === "today" ? label : `on ${label}`;
+}
+
+async function setIcon(bins, badge, title, badgeColour = "#374151") {
   await chrome.action.setIcon({ imageData: iconImageData(bins) });
   await chrome.action.setBadgeText({ text: badge });
-  await chrome.action.setBadgeBackgroundColor({ color: badge === "Now" ? "#b91c1c" : "#374151" });
+  await chrome.action.setBadgeBackgroundColor({ color: badgeColour });
   await chrome.action.setBadgeTextColor?.({ color: "#ffffff" });
   await chrome.action.setTitle({ title });
 }
 
-/** Exact alarm for remindHour on the evening before the next collection. */
-async function scheduleReminder(settings, next, now) {
+/**
+ * Exact alarms for the next collection: the reminder at remindHour the
+ * evening before, and the switch to the van at COLLECTED_HOUR on the day.
+ */
+async function scheduleAlarms(settings, next, now) {
   await chrome.alarms.clear("remind");
-  if (!settings.remind) return;
+  await chrome.alarms.clear("collected");
+  if (!next) return;
   const [y, m, d] = next.date.split("-").map(Number);
-  const at = new Date(y, m - 1, d - 1, settings.remindHour ?? 19, 0, 0);
-  if (at > now) await chrome.alarms.create("remind", { when: at.getTime() });
+  const remindAt = new Date(y, m - 1, d - 1, settings.remindHour ?? 19, 0, 0);
+  if (settings.remind && remindAt > now) {
+    await chrome.alarms.create("remind", { when: remindAt.getTime() });
+  }
+  const doneAt = collectedAt(next.date);
+  if (doneAt > now) await chrome.alarms.create("collected", { when: doneAt.getTime() });
 }
 
 /** Notify once per collection, any time from remindHour on the eve onwards. */

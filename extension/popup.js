@@ -1,4 +1,5 @@
 import {
+  collectionState,
   daysUntil,
   describe,
   describeRound,
@@ -10,7 +11,7 @@ import {
   resolveGardenRound,
   upcoming,
 } from "./lib.js";
-import { drawBin } from "./icons.js";
+import { drawBin, drawVan } from "./icons.js";
 
 const $ = (id) => document.getElementById(id);
 const asTab = new URLSearchParams(location.search).has("setup");
@@ -59,7 +60,22 @@ async function renderMain() {
     ? `Updated ${new Date(cache.fetchedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}`
     : "";
 
-  const [next, ...rest] = list;
+  const { collected } = ready
+    ? collectionState(cache.schedule, today, settings.garden)
+    : { collected: null };
+  const [next, ...rest] = collected ? list.slice(1) : list;
+
+  if (collected) {
+    $("hero-when").textContent = "Done for today";
+    $("hero-text").textContent = "The van's been";
+    $("hero-date").textContent = next
+      ? `Next: ${describe(next.bins)}, ${longDay(next.date)}`
+      : `Today's ${describe(collected.bins)} collected`;
+    drawVan($("hero-icon").getContext("2d"), $("hero-icon").width);
+    renderUpcoming(rest);
+    return;
+  }
+
   if (!next) {
     $("hero-when").textContent = "";
     $("hero-text").textContent = cache.error ? "No dates available" : "Fetching dates…";
@@ -70,9 +86,7 @@ async function renderMain() {
   }
 
   const days = daysUntil(next.date, today);
-  const longDate = parseIso(next.date).toLocaleDateString("en-GB", {
-    weekday: "long", day: "numeric", month: "long",
-  });
+  const longDate = longDay(next.date);
   if (days === 1) {
     $("hero-when").textContent = "Tonight";
     $("hero-text").textContent = `Put out the ${describe(next.bins)}`;
@@ -87,7 +101,10 @@ async function renderMain() {
     $("hero-date").textContent = longDate;
   }
   paint($("hero-icon"), next.bins);
+  renderUpcoming(rest);
+}
 
+function renderUpcoming(rest) {
   $("upcoming").replaceChildren(
     ...rest.slice(0, 6).map(({ date, bins }) => {
       const li = document.createElement("li");
@@ -253,6 +270,13 @@ function setupError(message) {
 
 function paint(canvas, bins) {
   drawBin(canvas.getContext("2d"), canvas.width, bins);
+}
+
+/** "2026-10-09" -> "Friday 9 October". */
+function longDay(isoDay) {
+  return parseIso(isoDay).toLocaleDateString("en-GB", {
+    weekday: "long", day: "numeric", month: "long",
+  });
 }
 
 function capitalise(text) {
